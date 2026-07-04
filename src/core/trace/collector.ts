@@ -52,6 +52,48 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// --- Hub navigation bar -----------------------------------------------------
+// Env-configurable so the shared collector stays company-agnostic: a deployment
+// sets its own brand + links via the container env, nothing is hardcoded here.
+//   RTM_BRAND      brand text        (default "Status Hub")
+//   RTM_BRAND_ICON leading emoji     (default "📊")
+//   RTM_NAV        JSON array of {label,href} — http(s) hrefs open in a new tab
+//   RTM_SIGNOUT_URL if set, renders a "Sign out" link (e.g. /oauth2/sign_out)
+const BRAND = process.env.RTM_BRAND ?? 'Status Hub';
+const BRAND_ICON = process.env.RTM_BRAND_ICON ?? '📊';
+const SIGNOUT_URL = process.env.RTM_SIGNOUT_URL ?? '';
+
+function navLinks(): { label: string; href: string }[] {
+  try {
+    const raw = JSON.parse(process.env.RTM_NAV ?? '[]') as unknown;
+    if (!Array.isArray(raw)) return [];
+    return (raw as { label: string; href: string }[]).filter((l) => l && l.label && l.href);
+  } catch {
+    return [];
+  }
+}
+
+const NAV_CSS =
+  '.hubnav{position:sticky;top:12px;z-index:20;display:flex;align-items:center;gap:16px;padding:11px 16px;margin:0 0 22px;' +
+  'background:#0d1117;border:1px solid #30363d;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.16)}' +
+  '.hubnav .brand{font-weight:700;font-size:15px;color:#fff;text-decoration:none;white-space:nowrap}' +
+  '.hubnav .links{display:flex;gap:18px;flex:1;flex-wrap:wrap}' +
+  '.hubnav .links a{color:#adbac7;text-decoration:none;font-size:13px;font-weight:500}' +
+  '.hubnav .links a:hover{color:#fff}' +
+  '.hubnav .signout{color:#adbac7;text-decoration:none;font-size:12px;font-weight:600;border:1px solid #30363d;' +
+  'border-radius:6px;padding:6px 12px;white-space:nowrap}.hubnav .signout:hover{border-color:#8b949e;color:#fff}';
+
+function navBar(): string {
+  const links = navLinks()
+    .map((l) => {
+      const ext = /^https?:/i.test(l.href) ? ' target="_blank" rel="noopener"' : '';
+      return `<a href="${esc(l.href)}"${ext}>${esc(l.label)}</a>`;
+    })
+    .join('');
+  const signout = SIGNOUT_URL ? `<a class="signout" href="${esc(SIGNOUT_URL)}">Sign out</a>` : '';
+  return `<nav class="hubnav"><a class="brand" href="/">${esc(BRAND_ICON)} ${esc(BRAND)}</a><div class="links">${links}</div>${signout}</nav>`;
+}
+
 /** Aggregate index: one row per project with its latest status. */
 function indexPage(dir: string): string {
   const rows = projects(dir).map((slug) => {
@@ -67,16 +109,14 @@ function indexPage(dir: string): string {
   });
   const body = rows.length ? rows.join('') : '<tr><td colspan="6">No reports yet — point a project\'s <code>output.post</code> at <code>/ingest</code>.</td></tr>';
   return (
-    '<!doctype html><html><head><meta charset="utf-8"><title>RTM collector</title>' +
+    `<!doctype html><html><head><meta charset="utf-8"><title>${esc(BRAND)}</title>` +
     '<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:32px;color:#24292f}' +
     'h1{font-size:20px}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:8px 12px;border-bottom:1px solid #eaeef2}' +
     'th{background:#f6f8fa;font-size:12px;text-transform:uppercase;color:#57606a}a{color:#0969da}' +
-    '.topnav{margin:0 0 18px;font-size:13px}.topnav a{display:inline-flex;gap:6px;align-items:center;text-decoration:none;' +
-    'font-weight:600;color:#0969da;background:#f6f8fa;border:1px solid #d0d7de;border-radius:8px;padding:7px 12px}' +
-    '.topnav a:hover{border-color:#0969da}</style></head><body>' +
+    NAV_CSS +
+    '</style></head><body>' +
+    navBar() +
     '<h1>Requirements Traceability — all projects</h1>' +
-    '<div class="topnav"><a href="https://map.dloizides.com" target="_blank" rel="noopener">🗺️ Deployment Map → map.dloizides.com</a>' +
-    '<a href="https://map.dloizides.com/roadmap.html" target="_blank" rel="noopener" style="margin-left:8px">🧭 Roadmap</a></div>' +
     '<table><thead><tr><th>Project</th><th>Coverage</th><th>Verified</th><th>Failing</th><th>Commit</th><th>Updated</th></tr></thead>' +
     `<tbody>${body}</tbody></table></body></html>`
   );
@@ -150,8 +190,9 @@ export async function serveCollector(opts: CollectorOptions = {}): Promise<Serve
       if (!report) return json(res, 404, { error: 'no report' });
       const runs = listRuns(join(dir, slug)).map((p) => p.split(/[\\/]/).pop() as string).reverse().slice(0, 20);
       const histLinks = runs.map((r) => `<a href="/p/${encodeURIComponent(slug)}/runs/${encodeURIComponent(r)}">${esc(r.slice(0, 19))}</a>`).join(' · ');
-      const back = `<div style="margin:12px 18px"><a href="/">← all projects</a> · history: ${histLinks}</div>`;
-      return html(res, renderHtml(report).replace('<div class="wrap">', `${back}<div class="wrap">`));
+      const back = `<div style="margin:14px 0 4px"><a href="/">← all projects</a> · history: ${histLinks}</div>`;
+      const inject = `<style>${NAV_CSS}</style>${navBar()}${back}`;
+      return html(res, renderHtml(report).replace('<div class="wrap">', `${inject}<div class="wrap">`));
     }
     json(res, 404, { error: `no route: ${key}` });
   }
