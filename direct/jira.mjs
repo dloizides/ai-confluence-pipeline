@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Direct Jira publisher — NO n8n, NO Docker. Uses curl + corporate proxy + UTF-8 temp-file bodies.
- * Actions: create-epic <md> | create-stories <epicKey> <md...> | update <key> <md> | set-parent <key> <epicKey> | get <key>
+ * Actions: create-epic <md> | create-stories <epicKey> <md...> | update <key> <md> | set-parent <key> <epicKey> | get <key> | fetch <key> [outDir|outFile.md]
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -78,6 +78,44 @@ async function jira(method, p, body) {
   } finally { if (tmpFile) try { fs.unlinkSync(tmpFile); } catch {} }
 }
 
+// ADF -> Markdown-ish text (for `fetch`)
+function adfToMd(node, depth = 0) {
+  if (!node) return '';
+  if (Array.isArray(node)) return node.map(n => adfToMd(n, depth)).join('');
+  const c = node.content;
+  switch (node.type) {
+    case 'doc': return adfToMd(c, depth);
+    case 'paragraph': return adfToMd(c, depth) + '\n\n';
+    case 'text': {
+      let t = node.text || ''; const marks = (node.marks || []).map(m => m.type);
+      if (marks.includes('code')) t = '`' + t + '`';
+      if (marks.includes('strong')) t = '**' + t + '**';
+      if (marks.includes('em')) t = '*' + t + '*';
+      const link = (node.marks || []).find(m => m.type === 'link'); if (link) t = `[${t}](${link.attrs.href})`;
+      return t;
+    }
+    case 'hardBreak': return '\n';
+    case 'heading': return '#'.repeat(node.attrs?.level || 1) + ' ' + adfToMd(c, depth) + '\n\n';
+    case 'bulletList': case 'orderedList': case 'taskList': return adfToMd(c, depth) + '\n';
+    case 'listItem': return '  '.repeat(depth) + '- ' + adfToMd(c, depth + 1).replace(/\n\n$/, '\n').trim() + '\n';
+    case 'taskItem': return '  '.repeat(depth) + '- [' + (node.attrs?.state === 'DONE' ? 'x' : ' ') + '] ' + adfToMd(c, depth).trim() + '\n';
+    case 'codeBlock': return '```' + (node.attrs?.language || '') + '\n' + adfToMd(c, depth) + '\n```\n\n';
+    case 'blockquote': return adfToMd(c, depth).split('\n').map(l => l ? '> ' + l : '').join('\n') + '\n';
+    case 'rule': return '\n---\n\n';
+    case 'mediaSingle': case 'mediaGroup': return '[media]\n\n';
+    case 'media': return '[attachment: ' + (node.attrs?.id || '') + ']';
+    case 'mention': return '@' + (node.attrs?.text || node.attrs?.id || '');
+    case 'inlineCard': return node.attrs?.url || '[card]';
+    case 'emoji': return node.attrs?.text || node.attrs?.shortName || '';
+    case 'status': return '[' + (node.attrs?.text || '') + ']';
+    case 'table': return adfToMd(c, depth) + '\n';
+    case 'tableRow': return '| ' + (c || []).map(cell => adfToMd(cell.content, depth).replace(/\n+/g, ' ').trim()).join(' | ') + ' |\n';
+    case 'tableHeader': case 'tableCell': return adfToMd(c, depth);
+    default: return adfToMd(c, depth);
+  }
+}
+const fmtDate = s => s ? s.slice(0, 16).replace('T', ' ') : '';
+
 const [action, ...rest] = process.argv.slice(2);
 const flags = rest.filter(a => a.startsWith('--'));
 const args = rest.filter(a => !a.startsWith('--'));
@@ -107,4 +145,36 @@ if (action === 'create-epic') {
 } else if (action === 'get') {
   const r = await jira('GET', '/rest/api/3/issue/' + extractKey(args[0]) + '?fields=summary,parent,issuetype,assignee,reporter,description');
   console.log(r.status, '|', r.json.fields?.issuetype?.name, '| parent', r.json.fields?.parent?.key, '| assignee', r.json.fields?.assignee?.displayName, '| reporter', r.json.fields?.reporter?.displayName, '| descNodes', r.json.fields?.description?.content?.length, '|', r.json.fields?.summary);
+} else if (action === 'fetch') {
+  // fetch <key> [outDir|outFile] — full ticket + linked issues + subtasks + all comments -> Markdown
+  const key = extractKey(args[0]);
+  const FIELDS = 'summary,status,issuetype,priority,assignee,reporter,created,updated,labels,components,fixVersions,parent,resolution,description,issuelinks,subtasks';
+  const r = await jira('GET', '/rest/api/3/issue/' + key + '?fields=' + FIELDS);
+  if (r.status >= 300) { console.log('FAIL ' + r.status + ' ' + JSON.stringify(r.json).slice(0, 700)); process.exit(1); }
+  const f = r.json.fields;
+  let out = `# ${key} — ${f.summary}\n\n`;
+  out += `| Field | Value |\n|---|---|\n`;
+  out += `| Type | ${f.issuetype?.name} |\n| Status | ${f.status?.name} |\n| Resolution | ${f.resolution?.name || '—'} |\n`;
+  out += `| Priority | ${f.priority?.name || '—'} |\n| Assignee | ${f.assignee?.displayName || '—'} |\n| Reporter | ${f.reporter?.displayName || '—'} |\n`;
+  out += `| Created | ${fmtDate(f.created)} |\n| Updated | ${fmtDate(f.updated)} |\n`;
+  out += `| Components | ${(f.components || []).map(x => x.name).join(', ') || '—'} |\n`;
+  out += `| Fix Versions | ${(f.fixVersions || []).map(x => x.name).join(', ') || '—'} |\n`;
+  out += `| Labels | ${(f.labels || []).join(', ') || '—'} |\n`;
+  out += `| Parent | ${f.parent?.key || '—'} ${f.parent?.fields?.summary || ''} |\n`;
+  out += `\n## Description\n\n` + (f.description ? adfToMd(f.description) : '_(empty)_') + '\n';
+  if (f.issuelinks?.length) {
+    out += `\n## Linked Issues\n\n`;
+    for (const l of f.issuelinks) { const o = l.outwardIssue || l.inwardIssue; const rel = l.outwardIssue ? l.type.outward : l.type.inward; out += `- ${rel}: **${o.key}** — ${o.fields?.summary} _(${o.fields?.status?.name})_\n`; }
+  }
+  if (f.subtasks?.length) { out += `\n## Subtasks\n\n`; for (const s of f.subtasks) out += `- **${s.key}** — ${s.fields?.summary} _(${s.fields?.status?.name})_\n`; }
+  const cr = await jira('GET', '/rest/api/3/issue/' + key + '/comment?maxResults=200&orderBy=created');
+  out += `\n## Comments (${cr.json.total || 0})\n\n`;
+  for (const cm of (cr.json.comments || [])) {
+    out += `### ${cm.author?.displayName} — ${fmtDate(cm.created)}${cm.updated !== cm.created ? ' (edited ' + fmtDate(cm.updated) + ')' : ''}\n\n`;
+    out += adfToMd(cm.body).trim() + '\n\n';
+  }
+  const dest = args[1];
+  const fp = dest ? (/\.md$/i.test(dest) ? dest : path.join(dest, key + '.md')) : path.join(process.cwd(), key + '.md');
+  fs.writeFileSync(fp, out, 'utf8');
+  console.log('WROTE ' + fp + ' (' + out.length + ' chars, ' + (cr.json.total || 0) + ' comments)');
 } else if (action) console.log('unknown action:', action);

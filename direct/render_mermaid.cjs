@@ -29,9 +29,15 @@ function htmlFor(src) {
 }
 
 function chrome(args) {
-  return execFileSync(CHROME, ['--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run',
-    '--allow-file-access-from-files', '--hide-scrollbars', '--virtual-time-budget=20000',
-    '--default-background-color=FFFFFFFF', ...args], { maxBuffer: 64 * 1024 * 1024 });
+  // Dedicated throwaway profile per invocation — otherwise, when the user already has Chrome open on
+  // the default profile, `--headless=new` attaches to that running singleton and never returns/writes.
+  const udd = path.join(os.tmpdir(), `cr-mmd-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  try {
+    return execFileSync(CHROME, ['--headless', '--disable-gpu', '--no-sandbox', '--no-first-run',
+      '--allow-file-access-from-files', '--hide-scrollbars', '--virtual-time-budget=20000',
+      `--user-data-dir=${udd}`, '--default-background-color=FFFFFFFF', ...args],
+      { maxBuffer: 64 * 1024 * 1024, timeout: 60000 });
+  } finally { try { fs.rmSync(udd, { recursive: true, force: true }); } catch {} }
 }
 
 function render(src, outPng) {

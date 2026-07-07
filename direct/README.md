@@ -54,6 +54,7 @@ node jira.mjs create-stories <epicKey> <md1> [md2 …]  # Stories under an exist
 node jira.mjs update        <issueKey> <file.md>
 node jira.mjs set-parent    <issueKey> <epicKey>
 node jira.mjs get           <issueKey>                # type / parent / assignee / desc length
+node jira.mjs fetch         <issueKey> [outDir|out.md] # full ticket + links + subtasks + all comments -> Markdown
 ```
 
 - Team-managed projects link a Story to its Epic via `fields.parent = { key: <epicKey> }` (there is
