@@ -64,6 +64,23 @@ node jira.mjs fetch         <issueKey> [outDir|out.md] # full ticket + links + s
 - Markdown: `# KEY — [TAG] Title` (the `KEY — ` prefix is stripped for the summary), `## Acceptance
   Criteria` becomes an ADF task list. A `[WS]` work-type tag is prepended unless the H1 already has one.
 
+## Session digest — `session-digest.mjs`
+
+Distils the **local Claude Code session transcripts** (`~/.claude/projects`) into a compact digest —
+session title + opening prompt(s) + date span + git branch + Jira keys — for "what did I work on?"
+reviews. It reads the (large) transcripts on disk and emits only a few KB, so an agent can consume it
+without burning tokens. Nothing leaves the machine.
+
+```bash
+node session-digest.mjs [days] [--md] [--html] [--out <path>] [--project <slug>] [--all-projects]
+```
+
+- `days` — lookback window (default 14). No flag → plain text digest to stdout.
+- `--md` / `--html` — write a report grouped **by week** (Jira roll-up + per-session cards). Default
+  output is `C:\DemetrisLoizidesAll\Retrospective\session-digest-<today>.<ext>`; override with `--out`.
+- Portable: the projects root is derived from the OS home dir. HTML is a local file — never published.
+- Consumed by the personal `/sprint-report` skill (in `~/.claude/skills`, not this repo).
+
 ## Markdown the converters understand
 
 `# Title`, `## Section`, paragraphs, **bold**/*italic*/`code`, `[links](url)`, tables, fenced code,
