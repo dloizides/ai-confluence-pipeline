@@ -84,7 +84,30 @@ function scanSession(fp, projSlug) {
       }
     }
   }
-  return { proj: projSlug, file: path.basename(fp), title, branch, first, last, prompts, jira: [...jira], turns };
+  return { proj: projSlug, file: path.basename(fp), title, label: deriveLabel(title, prompts, [...jira]), branch, first, last, prompts, jira: [...jira], turns };
+}
+
+// A readable label for the session. Prefer Claude Code's own title, but never surface "(untitled)"
+// or a bare Jira number — synthesise a short plain-English label from the first typed prompt instead.
+function deriveLabel(title, prompts, jira) {
+  const t = (title || "").trim();
+  const bareJira = /^CLS-\d{3,6}$/i.test(t);
+  if (t && !bareJira && !/^untitled$/i.test(t)) return t;
+  let c = (prompts[0] || "").trim();
+  c = c.replace(/^[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,3}\s+\d{1,2}\/\d{1,2}\/\d{2,4}[^•·-]*[•·-]\s*/i, ""); // drop leading pasted chat "Name 1/2/26 3:45 PM •"
+  c = c.replace(/^(ok(ay)?|so|now|listen|hi|hey|right|guys)[,!\s]+/i, "");
+  c = c.replace(/^(please\s+)?(can|could|would|will)\s+you\s+(please\s+)?/i, "");
+  c = c.replace(/^(your task is to|i want you to|i need you to|i'?d like you to|we need to|we have to|we are to|we want to|let'?s|i think we should|help me|i want|i need)\s+/i, "");
+  c = c.replace(/https?:\/\/\S+/gi, "");             // drop URLs
+  c = c.replace(/[A-Za-z]:\\[^\s"']+/g, "");         // drop Windows paths
+  c = c.replace(/["'`]\s*["'`]/g, " ").replace(/^["'`\s]+/, ""); // collapse now-empty quote pairs
+  c = c.replace(/\s+/g, " ").trim();
+  let words = c.split(" ").slice(0, 9).join(" ").replace(/[,:;.!]+$/, "");
+  if (!words) words = t || "work session";
+  let label = words.charAt(0).toUpperCase() + words.slice(1);
+  if (label.length > 70) label = label.slice(0, 68).trim() + "…";
+  if (bareJira && !label.toUpperCase().includes(t.toUpperCase())) label += ` (${t.toUpperCase()})`;
+  return label;
 }
 
 const sessions = [];
@@ -151,7 +174,7 @@ function renderText() {
   out.push(`# Claude Code sessions — last ${days} days (${sessions.length} sessions)`);
   out.push(`# window ${windowFrom} → ${windowTo}${earliestNote ? `  (some threads started earlier, back to ${earliestNote})` : ""}\n`);
   for (const s of sessions) {
-    out.push(`## ${iso(s.last)}  —  ${s.title || "(untitled)"}`);
+    out.push(`## ${iso(s.last)}  —  ${s.label}`);
     let jiraStr = "";
     if (s.jira.length) { const { shown, more } = capKeys(s.jira, PER_SESSION_CAP); jiraStr = "   jira: " + shown.join(", ") + (more ? ` +${more}` : ""); }
     out.push(`   branch: ${s.branch || "-"}   span: ${iso(s.first)}→${iso(s.last)}   turns: ${s.turns}${jiraStr}`);
@@ -185,7 +208,7 @@ function renderMd() {
     out.push("");
     for (const s of list.sort((a, b) => a.last - b.last)) {
       const span = iso(s.first) === iso(s.last) ? iso(s.last) : `${iso(s.first)} → ${iso(s.last)}`;
-      out.push(`### ${s.title || "(untitled)"}  ·  ${span}`);
+      out.push(`### ${s.label}  ·  ${span}`);
       const meta = [];
       if (s.jira.length) {
         const { shown, more } = capKeys(s.jira, PER_SESSION_CAP);
@@ -214,7 +237,7 @@ function renderHtml() {
       const jira = s.jira.length ? `<div class="jira">${jk.map(k => `<span class="chip sm">${esc(k)}</span>`).join("")}${jm ? `<span class="chip sm more">+${jm}</span>` : ""}</div>` : "";
       const asks = s.prompts.map(p => `<li>${esc(p)}</li>`).join("");
       return `<div class="card">
-        <div class="card-h"><span class="title">${esc(s.title || "(untitled)")}</span><span class="date">${esc(span)}</span></div>
+        <div class="card-h"><span class="title">${esc(s.label)}</span><span class="date">${esc(span)}</span></div>
         <div class="meta">branch ${esc(s.branch || "-")} · ${s.turns} turns</div>
         ${jira}
         <ul class="asks">${asks}</ul>
