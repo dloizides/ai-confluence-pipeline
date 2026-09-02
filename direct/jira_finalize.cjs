@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // CLS-13400 finalization: close delivered stories, split 13410 (new leftovers story), update epic Reference Documents.
 const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path'); const { execFileSync } = require('node:child_process');
+const { curlProxyArgs } = require('./proxy.cjs');
 const env = {}; for (const l of fs.readFileSync(path.join(__dirname, '..', '.env'), 'utf8').split(/\r?\n/)) { const m = l.match(/^([A-Z0-9_]+)=(.*)$/); if (m) env[m[1]] = m[2].replace(/\s+#.*$/, '').trim(); }
-const BASE = env.JIRA_BASE_URL, AUTH = 'Basic ' + Buffer.from(`${env.JIRA_EMAIL}:${env.JIRA_API_TOKEN}`).toString('base64'), PROXY = 'occyproxy.odysseycs.com:8080';
-function jira(method, p, body) { const a = ['-s','-w','\n%{http_code}','--proxy',PROXY,'-X',method,'-H',`Authorization: ${AUTH}`,'-H','Content-Type: application/json','-H','Accept: application/json']; let tmp=null; if(body){tmp=path.join(os.tmpdir(),`jf-${Date.now()}-${Math.floor(performance.now())}.json`);fs.writeFileSync(tmp,JSON.stringify(body));a.push('--data-binary',`@${tmp}`);} a.push(BASE+p); try{const o=execFileSync('curl',a,{maxBuffer:8*1024*1024}).toString('utf8');const nl=o.lastIndexOf('\n');let j=null;try{j=JSON.parse(o.slice(0,nl));}catch{}return{status:parseInt(o.slice(nl+1),10),j,raw:o.slice(0,nl)};}finally{if(tmp)try{fs.unlinkSync(tmp);}catch{}} }
+const BASE = env.JIRA_BASE_URL, AUTH = 'Basic ' + Buffer.from(`${env.JIRA_EMAIL}:${env.JIRA_API_TOKEN}`).toString('base64');
+const PROXY_ARGS = curlProxyArgs(env);
+function jira(method, p, body) { const a = ['-s','-w','\n%{http_code}',...PROXY_ARGS,'-X',method,'-H',`Authorization: ${AUTH}`,'-H','Content-Type: application/json','-H','Accept: application/json']; let tmp=null; if(body){tmp=path.join(os.tmpdir(),`jf-${Date.now()}-${Math.floor(performance.now())}.json`);fs.writeFileSync(tmp,JSON.stringify(body));a.push('--data-binary',`@${tmp}`);} a.push(BASE+p); try{const o=execFileSync('curl',a,{maxBuffer:8*1024*1024}).toString('utf8');const nl=o.lastIndexOf('\n');let j=null;try{j=JSON.parse(o.slice(0,nl));}catch{}return{status:parseInt(o.slice(nl+1),10),j,raw:o.slice(0,nl)};}finally{if(tmp)try{fs.unlinkSync(tmp);}catch{}} }
 
 const WIKI = 'https://clearskies.atlassian.net/wiki/spaces';
 const text=(t,marks)=>marks?{type:'text',text:t,marks}:{type:'text',text:t};

@@ -26,7 +26,9 @@ JIRA_STORY_ISSUE_TYPE=Story
 ```
 
 - Point at a different env file with `ACP_ENV=/path/to/.env`.
-- Behind a proxy, set `HTTPS_PROXY` (e.g. `export HTTPS_PROXY=host:8080`); otherwise no proxy is needed.
+- Set `HTTPS_PROXY` **only if your network requires an egress proxy** (e.g. `export HTTPS_PROXY=host:8080`,
+  or `HTTPS_PROXY=host:8080` in `.env`); leave it unset otherwise and the scripts connect directly.
+  A shell `HTTPS_PROXY`/`https_proxy` wins over the `.env` value — there is no built-in default proxy.
 - Requires `curl` on `PATH` and Node 18+. The mermaid renderer needs a local **Chrome/Edge**.
 
 ## Confluence — `confluence.mjs`
