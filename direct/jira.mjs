@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Direct Jira publisher — NO n8n, NO Docker. Uses curl + corporate proxy + UTF-8 temp-file bodies.
+ * Direct Jira publisher — NO n8n, NO Docker. Uses curl + optional egress proxy + UTF-8 temp-file bodies.
  * Actions: create-epic <md> | create-stories <epicKey> <md...> | update <key> <md> | set-parent <key> <epicKey> | get <key> | fetch <key> [outDir|outFile.md]
  */
 import fs from 'node:fs';
@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { curlProxyArgs } from './proxy.cjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ENV_PATH = process.env.ACP_ENV || path.join(HERE, '..', '.env');
@@ -15,7 +16,7 @@ const env = {};
 for (const line of fs.readFileSync(ENV_PATH, 'utf8').split(/\r?\n/)) { const m = line.match(/^([A-Z0-9_]+)=(.*)$/); if (m) env[m[1]] = m[2].replace(/\s+#.*$/, '').trim(); }
 const BASE = env.JIRA_BASE_URL, AUTH = 'Basic ' + Buffer.from(`${env.JIRA_EMAIL}:${env.JIRA_API_TOKEN}`).toString('base64');
 const PROJECT = env.JIRA_PROJECT_KEY, STORY = env.JIRA_STORY_ISSUE_TYPE || 'Story';
-const PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || 'occyproxy.odysseycs.com:8080';
+const PROXY_ARGS = curlProxyArgs(env);
 const OKLANG = new Set(['sql','json','javascript','typescript','java','csharp','c#','bash','shell','text','xml','yaml','python','html','css','plaintext']);
 
 function mdToAdf(md) {
@@ -70,7 +71,7 @@ async function jira(method, p, body) {
   let tmpFile = null; const bodyArgs = [];
   if (body) { tmpFile = path.join(os.tmpdir(), `jira-body-${process.pid}-${Date.now()}.json`); fs.writeFileSync(tmpFile, JSON.stringify(body), 'utf8'); bodyArgs.push('--data-binary', `@${tmpFile}`); }
   try {
-    const out = execFileSync('curl', ['-s', '-w', '\n%{http_code}', '--proxy', PROXY, '-X', method,
+    const out = execFileSync('curl', ['-s', '-w', '\n%{http_code}', ...PROXY_ARGS, '-X', method,
       '-H', `Authorization: ${AUTH}`, '-H', 'Content-Type: application/json', '-H', 'Accept: application/json',
       ...bodyArgs, BASE + p], { maxBuffer: 4 * 1024 * 1024 }).toString('utf8');
     const nl = out.lastIndexOf('\n'); const status = parseInt(out.slice(nl + 1), 10); const text = out.slice(0, nl);

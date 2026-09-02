@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Direct Confluence publisher — NO n8n, NO Docker. curl + corporate proxy + UTF-8 temp bodies.
+ * Direct Confluence publisher — NO n8n, NO Docker. curl + optional egress proxy + UTF-8 temp bodies.
  * Converter (mdToConfluenceHtml) is the verbatim copy from workflows/markdown-to-confluence-pipeline.json,
  * EXCEPT the ```mermaid``` branch: blocks are rendered to PNG (system Chrome, see render_mermaid.cjs),
  * attached to the page, and emitted as <ac:image><ri:attachment/></ac:image> (matches the team convention).
@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { curlProxyArgs } from './proxy.cjs';
 
 const require = createRequire(import.meta.url);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -26,7 +27,7 @@ for (const line of fs.readFileSync(ENV_PATH, 'utf8').split(/\r?\n/)) { const m =
 const BASE = env.CONFLUENCE_BASE_URL;
 const AUTH = 'Basic ' + Buffer.from(`${env.CONFLUENCE_EMAIL}:${env.CONFLUENCE_API_TOKEN}`).toString('base64');
 const SPACE_KEY = env.CONFLUENCE_SPACE_KEY;
-const PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || 'occyproxy.odysseycs.com:8080';
+const PROXY_ARGS = curlProxyArgs(env);
 
 // ---- verbatim converter (mermaid branch swapped for ac:image) ----
 function mdToConfluenceHtml(md, mermaidNames /* array of filenames, consumed in order */) {
@@ -74,7 +75,7 @@ async function conf(method, p, body) {
   let tmp = null; const extra = [];
   if (body) { tmp = path.join(os.tmpdir(), `conf-${process.pid}-${Date.now()}.json`); fs.writeFileSync(tmp, JSON.stringify(body), 'utf8'); extra.push('--data-binary', `@${tmp}`); }
   try {
-    const out = execFileSync('curl', ['-s', '-w', '\n%{http_code}', '--proxy', PROXY, '-X', method,
+    const out = execFileSync('curl', ['-s', '-w', '\n%{http_code}', ...PROXY_ARGS, '-X', method,
       '-H', `Authorization: ${AUTH}`, '-H', 'Content-Type: application/json', '-H', 'Accept: application/json',
       ...extra, BASE + p], { maxBuffer: 16 * 1024 * 1024 }).toString('utf8');
     const nl = out.lastIndexOf('\n'); const status = parseInt(out.slice(nl + 1), 10); const text = out.slice(0, nl);
@@ -83,7 +84,7 @@ async function conf(method, p, body) {
 }
 
 function uploadAttachment(pageId, file) {
-  const out = execFileSync('curl', ['-s', '-w', '\n%{http_code}', '--proxy', PROXY, '-X', 'POST',
+  const out = execFileSync('curl', ['-s', '-w', '\n%{http_code}', ...PROXY_ARGS, '-X', 'POST',
     '-H', `Authorization: ${AUTH}`, '-H', 'X-Atlassian-Token: nocheck',
     '-F', 'minorEdit=true', '-F', `file=@${file}`,
     `${BASE}/wiki/rest/api/content/${pageId}/child/attachment`], { maxBuffer: 32 * 1024 * 1024 }).toString('utf8');

@@ -92,7 +92,8 @@ npm run build            # tsc → dist/
 
 `.env` keys that matter for direct REST: `JIRA_BASE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN`,
 `CONFLUENCE_BASE_URL` / `CONFLUENCE_EMAIL` / `CONFLUENCE_API_TOKEN`, optional
-`CONFLUENCE_MERMAID_MACRO`. The forward n8n flow also uses `WEBHOOK_URL`. Full field-by-field in
+`CONFLUENCE_MERMAID_MACRO`, plus optional `HTTPS_PROXY` — set that one only if your network
+requires an egress proxy; unset means a direct connection. The forward n8n flow also uses `WEBHOOK_URL`. Full field-by-field in
 [docs/SETUP.md](docs/SETUP.md).
 
 ## Build / test / verify commands

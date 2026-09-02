@@ -134,6 +134,11 @@ Edit `.env` with your values:
 - `JIRA_*` — same base URL and credentials as Confluence if using the same Atlassian instance
 - `JIRA_PROJECT_KEY` — the Jira project key (visible in ticket IDs like `PROJ-123`)
 
+**Network (optional):**
+- `HTTPS_PROXY` — set this **only if your network requires an egress proxy** to reach the internet
+  (e.g. `proxy.example.com:8080`). Leave it unset otherwise; connections are then made directly.
+  A shell `HTTPS_PROXY`/`https_proxy` takes precedence over the `.env` value.
+
 ## 3. Start n8n
 
 Make sure Docker Desktop is running, then:

@@ -3,18 +3,19 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { curlProxyArgs } = require('./proxy.cjs');
 
 const env = {};
 for (const line of fs.readFileSync(path.join(__dirname, '..', '.env'), 'utf8').split(/\r?\n/)) {
   const m = line.match(/^([A-Z0-9_]+)=(.*)$/); if (m) env[m[1]] = m[2].replace(/\s+#.*$/, '').trim();
 }
 const BASE = env.JIRA_BASE_URL, AUTH = 'Basic ' + Buffer.from(`${env.JIRA_EMAIL}:${env.JIRA_API_TOKEN}`).toString('base64');
-const PROXY = 'occyproxy.odysseycs.com:8080';
+const PROXY_ARGS = curlProxyArgs(env);
 const DUE = process.argv[2] || '2026-07-10';
 const KEYS = ['CLS-13407', 'CLS-13410'];
 
 function api(method, p, body) {
-  const args = ['-s', '-w', '\n%{http_code}', '--proxy', PROXY, '-X', method,
+  const args = ['-s', '-w', '\n%{http_code}', ...PROXY_ARGS, '-X', method,
     '-H', `Authorization: ${AUTH}`, '-H', 'Content-Type: application/json', '-H', 'Accept: application/json'];
   let tmp = null;
   if (body) { tmp = path.join(require('node:os').tmpdir(), `jb-${Date.now()}-${Math.floor(performance.now())}.json`); fs.writeFileSync(tmp, JSON.stringify(body)); args.push('--data-binary', `@${tmp}`); }
